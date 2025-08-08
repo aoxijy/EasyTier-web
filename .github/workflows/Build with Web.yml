@@ -150,10 +150,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            easytier/easytier-web:${{ env.BUILD_VERSION }}
-            easytier/easytier-web:latest
-            ghcr.io/easytier/easytier-web:${{ env.BUILD_VERSION }}
-            ghcr.io/easytier/easytier-web:latest
+            aoxijy/easytier-web:${{ env.BUILD_VERSION }}
+            aoxijy/easytier-web:latest
+            ghcr.io/aoxijy/easytier-web:${{ env.BUILD_VERSION }}
+            ghcr.io/aoxijy/easytier-web:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
             
