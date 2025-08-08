@@ -4,6 +4,9 @@ FROM alpine:latest AS base
 # 构建阶段
 FROM base AS builder
 
+# 声明 GitHub Token 作为构建参数
+ARG GITHUB_TOKEN
+
 # 安装构建依赖
 RUN apk add --no-cache git nodejs npm go gcc musl-dev
 
@@ -13,7 +16,11 @@ RUN git clone --depth 1 --branch ${EASYTIER_VERSION} https://github.com/EasyTier
 WORKDIR /src/easytier
 
 # 克隆并构建 EasyTier-Web-Embed (使用令牌认证)
-RUN git config --global url."https://oauth2:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/" && \
+# 使用更可靠的方式设置 Git 配置
+RUN echo "machine github.com login oauth2 password ${GITHUB_TOKEN}" > ~/.netrc && \
+    chmod 600 ~/.netrc && \
+    git config --global user.name "Docker Builder" && \
+    git config --global user.email "builder@docker" && \
     git clone --depth 1 https://github.com/EasyTier/EasyTier-Web-Embed.git web
 
 WORKDIR /src/easytier/web
