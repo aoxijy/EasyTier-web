@@ -16,7 +16,6 @@ env:
 
 jobs:
   version-check:
-    # ... 保持不变 ...
 
   build:
     needs: version-check
