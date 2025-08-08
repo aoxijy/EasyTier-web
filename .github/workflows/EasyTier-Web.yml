@@ -1,13 +1,14 @@
-name: EasyTier Auto Build with Web
+name: EasyTier Docker Build
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Daily build check
+    - cron: '0 0 * * *'  # 每天 UTC 00:00 运行
   workflow_dispatch:
     inputs:
-      force_version:
-        description: 'Force build specific version (e.g. v2.4.1)'
+      version:
+        description: 'EasyTier version to build (e.g. v2.4.1)'
         type: string
+        default: 'latest'
         required: false
 
 env:
@@ -17,36 +18,38 @@ jobs:
   version-check:
     runs-on: ubuntu-latest
     outputs:
-      latest_version: ${{ steps.get-version.outputs.latest_version }}
       should_build: ${{ steps.check-version.outputs.should_build }}
+      build_version: ${{ steps.get-version.outputs.build_version }}
     steps:
       - name: Get latest version
         id: get-version
         run: |
-          LATEST_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name')
-          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-          echo "Latest version: $LATEST_VERSION"
-
+          # 如果是手动触发且有指定版本，则使用该版本
+          if [ -n "${{ inputs.version }}" ] && [ "${{ inputs.version }}" != "latest" ]; then
+            BUILD_VERSION="${{ inputs.version }}"
+          else
+            # 获取最新版本
+            BUILD_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name')
+          fi
+          
+          echo "build_version=$BUILD_VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $BUILD_VERSION"
+          
       - name: Check if build needed
         id: check-version
         run: |
-          if [ -n "${{ inputs.force_version }}" ]; then
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "Forcing build for: ${{ inputs.force_version }}"
-            exit 0
-          fi
-          
+          # 检查此版本是否已构建过
           EXISTING_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/${{ env.DOCKERHUB_REPO }}/tags/?page_size=100" | jq -r '.results[].name')
           
-          if echo "$EXISTING_TAGS" | grep -q "${{ steps.get-version.outputs.latest_version }}"; then
+          if echo "$EXISTING_TAGS" | grep -q "${{ steps.get-version.outputs.build_version }}"; then
             echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Version ${{ steps.get-version.outputs.latest_version }} exists, skipping"
+            echo "Version ${{ steps.get-version.outputs.build_version }} already exists, skipping build"
           else
             echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "New version ${{ steps.get-version.outputs.latest_version }}, building"
+            echo "New version ${{ steps.get-version.outputs.build_version }}, building"
           fi
 
-  build-and-push:
+  build:
     needs: version-check
     if: ${{ needs.version-check.outputs.should_build == 'true' }}
     runs-on: ubuntu-latest
@@ -66,76 +69,17 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       
-      - name: Prepare source code
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          BUILD_VERSION=${{ needs.version-check.outputs.latest_version }}
-          if [ -n "${{ inputs.force_version }}" ]; then
-            BUILD_VERSION="${{ inputs.force_version }}"
-          fi
-          
-          if [[ ! $BUILD_VERSION =~ ^v ]]; then
-            BUILD_VERSION="v$BUILD_VERSION"
-          fi
-          
-          echo "Building version: $BUILD_VERSION"
-          
-          git clone --depth 1 --branch $BUILD_VERSION https://github.com/EasyTier/EasyTier.git easytier-source
-          
-          cd easytier-source
-          git clone --depth 1 "https://oauth2:$GITHUB_TOKEN@github.com/EasyTier/EasyTier-Web-Embed.git" web
-          
-          cd web
-          npm ci --silent
-          npm run build
-          cd ..
-          
-          # 使用外部文件存储 Dockerfile 内容
-          cat > Dockerfile << 'EOL'
-FROM alpine:latest AS base
-
-FROM base AS builder
-
-RUN apk add --no-cache git nodejs npm go gcc musl-dev
-
-COPY . /src/easytier
-WORKDIR /src/easytier
-
-RUN go build -o easytier-core -ldflags "-s -w -X 'main.version=${BUILD_VERSION}'" ./cmd/easytier
-
-RUN mkdir -p /tmp/output && \
-    cp easytier-core /tmp/output/easytier-core
-
-FROM base
-
-RUN apk add --no-cache tzdata tini iptables wireguard-tools
-
-COPY --from=builder --chmod=755 /tmp/output/* /usr/local/bin
-
-ENV TZ=Asia/Shanghai
-
-EXPOSE 11010/tcp
-EXPOSE 11010/udp
-EXPOSE 11011/udp
-EXPOSE 11011/tcp
-EXPOSE 11012/tcp
-EXPOSE 8080/tcp
-
-ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]
-EOL
-          
-          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
-      
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./easytier-source
+          context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
+            ${{ env.DOCKERHUB_REPO }}:${{ needs.version-check.outputs.build_version }}
             ${{ env.DOCKERHUB_REPO }}:latest
+          build-args: |
+            EASYTIER_VERSION=${{ needs.version-check.outputs.build_version }}
       
       - name: Send notification
         if: success()
@@ -146,8 +90,8 @@ EOL
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `✅ Successfully built EasyTier with Web image \`${{ env.BUILD_VERSION }}\`!\n\n` +
+              body: `✅ Successfully built EasyTier with Web image \`${{ needs.version-check.outputs.build_version }}\`!\n\n` +
                     `**Docker Hub:**\n` +
-                    `- ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}\n` +
+                    `- ${{ env.DOCKERHUB_REPO }}:${{ needs.version-check.outputs.build_version }}\n` +
                     `- ${{ env.DOCKERHUB_REPO }}:latest`
             })
