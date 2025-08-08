@@ -29,11 +29,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 下载并解压 EasyTier Release
-      - name: Download and extract EasyTier release
+      # 获取最新版本并下载 EasyTier Release
+      - name: Get latest EasyTier release version
         run: |
-          # 获取版本号（默认为最新版本）
-          BUILD_VERSION="${{ github.sha }}"  # 使用 Git SHA 作为版本，或者你可以指定具体版本号
+          # 获取最新版本号
+          BUILD_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          echo "Using EasyTier version: $BUILD_VERSION"
           
           # 下载并解压 EasyTier 版本包
           URL="https://github.com/EasyTier/EasyTier/releases/download/v${BUILD_VERSION}/easytier-linux-x86_64-v${BUILD_VERSION}.zip"
