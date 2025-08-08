@@ -1,4 +1,4 @@
-name: EasyTier Docker Build
+name: EasyTier Docker Build (AMD64)
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'EasyTier version to build (e.g. v2.4.1)'
+        description: 'EasyTier version to build (e.g. 2.4.1)'
         type: string
         default: 'latest'
         required: false
@@ -27,7 +27,8 @@ jobs:
           if [ -n "${{ inputs.version }}" ] && [ "${{ inputs.version }}" != "latest" ]; then
             BUILD_VERSION="${{ inputs.version }}"
           else
-            BUILD_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name')
+            # 获取最新版本（不带 "v" 前缀）
+            BUILD_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name | sub("^v"; "")')
           fi
           echo "build_version=$BUILD_VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $BUILD_VERSION"
@@ -52,9 +53,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -66,40 +64,35 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       
-      - name: Prepare source and artifacts
+      - name: Prepare artifacts
         run: |
-          # 获取版本信息
+          # 获取版本信息（不带 "v" 前缀）
           BUILD_VERSION=${{ needs.version-check.outputs.build_version }}
           if [ -n "${{ inputs.version }}" ] && [ "${{ inputs.version }}" != "latest" ]; then
             BUILD_VERSION="${{ inputs.version }}"
           fi
           
-          # 确保版本号格式正确
-          if [[ ! $BUILD_VERSION =~ ^v ]]; then
-            BUILD_VERSION="v$BUILD_VERSION"
-          fi
-          
           echo "Building version: $BUILD_VERSION"
           echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
           
-          # 下载官方 Release 压缩包
+          # 下载官方 Release 压缩包（ZIP格式）
           echo "Downloading EasyTier release package..."
-          ARCH="amd64"  # 任意架构，仅用于提取组件
-          URL="https://github.com/EasyTier/EasyTier/releases/download/$BUILD_VERSION/easytier-$BUILD_VERSION-linux-$ARCH.tar.gz"
-          wget -O easytier.tar.gz "$URL"
+          URL="https://github.com/EasyTier/EasyTier/releases/download/v${BUILD_VERSION}/easytier-linux-x86_64-v${BUILD_VERSION}.zip"
+          wget -O easytier.zip "$URL"
           
-          # 解压文件
-          tar -xzf easytier.tar.gz
+          # 解压ZIP文件
+          unzip easytier.zip -d easytier-${BUILD_VERSION}
           
           # 进入解压目录
-          cd "easytier-$BUILD_VERSION-linux-$ARCH"
+          cd "easytier-${BUILD_VERSION}"
           
           # 确保可执行权限
           chmod +x easytier-core
           
-          # 创建 Docker 构建上下文
+          # 创建Docker构建上下文
           mkdir -p docker-context
           cp easytier-core docker-context/
+          cp -r web docker-context/web  # 复制预构建的web目录
           
           # 返回上级目录
           cd ..
@@ -107,15 +100,12 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./docker-context
-          file: ./Dockerfile  # 使用仓库中的 Dockerfile
-          platforms: linux/amd64,linux/arm64
+          context: ./easytier-${BUILD_VERSION}/docker-context
+          file: ./Dockerfile  # 使用仓库根目录的Dockerfile
           push: true
           tags: |
             ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
             ${{ env.DOCKERHUB_REPO }}:latest
-          build-args: |
-            BUILD_VERSION=${{ env.BUILD_VERSION }}
       
       - name: Send success notification
         if: success()
