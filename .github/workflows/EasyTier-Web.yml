@@ -1,123 +1,63 @@
-name: EasyTier Docker Build (AMD64)
+name: Build and Publish EasyTier Docker Image
 
 on:
-  schedule:
-    - cron: '0 0 * * *'  # 每天 UTC 00:00 自动检查
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'EasyTier version to build (e.g. 2.4.1)'
-        type: string
-        default: 'latest'
-        required: false
+  push:
+    branches:
+      - main  # 当推送到主分支时自动触发构建
+  workflow_dispatch:  # 支持手动触发构建
 
 env:
   DOCKERHUB_REPO: aoxijy/easytier-web
 
 jobs:
-  version-check:
-    runs-on: ubuntu-latest
-    outputs:
-      build_version: ${{ steps.get-version.outputs.build_version }}
-      should_build: ${{ steps.check-version.outputs.should_build }}
-    steps:
-      - name: Get latest version
-        id: get-version
-        run: |
-          if [ -n "${{ inputs.version }}" ] && [ "${{ inputs.version }}" != "latest" ]; then
-            BUILD_VERSION="${{ inputs.version }}"
-          else
-            # 获取最新版本（不带 "v" 前缀）
-            BUILD_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name | sub("^v"; "")')
-          fi
-          echo "build_version=$BUILD_VERSION" >> $GITHUB_OUTPUT
-          echo "Detected version: $BUILD_VERSION"
-
-      - name: Check if build needed
-        id: check-version
-        run: |
-          EXISTING_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/${{ env.DOCKERHUB_REPO }}/tags/?page_size=100" | jq -r '.results[].name')
-          if echo "$EXISTING_TAGS" | grep -q "${{ steps.get-version.outputs.build_version }}"; then
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Version ${{ steps.get-version.outputs.build_version }} already exists"
-          else
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "New version detected, building ${{ steps.get-version.outputs.build_version }}"
-          fi
-
   build:
-    needs: version-check
-    if: ${{ needs.version-check.outputs.should_build == 'true' }}
     runs-on: ubuntu-latest
+
     steps:
+      # Checkout 仓库代码
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
+      # 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          install: true
-      
+
+      # Docker Hub 登录
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: Prepare artifacts
+
+      # 下载并解压 EasyTier Release
+      - name: Download and extract EasyTier release
         run: |
-          # 获取版本信息（不带 "v" 前缀）
-          BUILD_VERSION=${{ needs.version-check.outputs.build_version }}
-          if [ -n "${{ inputs.version }}" ] && [ "${{ inputs.version }}" != "latest" ]; then
-            BUILD_VERSION="${{ inputs.version }}"
-          fi
+          # 获取版本号（默认为最新版本）
+          BUILD_VERSION="${{ github.sha }}"  # 使用 Git SHA 作为版本，或者你可以指定具体版本号
           
-          echo "Building version: $BUILD_VERSION"
-          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
-          
-          # 下载官方 Release 压缩包（ZIP格式）
-          echo "Downloading EasyTier release package."
+          # 下载并解压 EasyTier 版本包
           URL="https://github.com/EasyTier/EasyTier/releases/download/v${BUILD_VERSION}/easytier-linux-x86_64-v${BUILD_VERSION}.zip"
           wget -O easytier.zip "$URL"
-          
-          # 解压ZIP文件
           unzip easytier.zip -d easytier-unpacked
+          cd easytier-unpacked/easytier-linux-x86_64
           
-          # 进入解压后的实际目录（根据您的输出）
-          cd "easytier-unpacked/easytier-linux-x86_64"
-          
-          # 确保可执行权限
+          # 确保 `easytier-core` 和 `easytier-web-embed` 文件有执行权限
           chmod +x easytier-core
-          
-          # 构建Web界面（如果需要）
-          if [ -f "easytier-web-embed" ]; then
-            chmod +x easytier-web-embed
-            ./easytier-web-embed --build-web
-          fi
-          
-          # 创建Docker构建上下文
-          mkdir -p docker-context
-          cp easytier-core docker-context/
-          
-          # 复制Web资源（如果存在）
-          if [ -d "web" ]; then
-            cp -r web docker-context/web
-          fi
-          
-          # 返回工作目录
-          cd ././.
-      
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./easytier-unpacked/easytier-linux-x86_64/docker-context
-          file: ./Dockerfile
-          push: true
-          tags: |
-            ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
-            ${{ env.DOCKERHUB_REPO }}:latest
-      
+          chmod +x easytier-web-embed
+
+      # 构建 Docker 镜像
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.DOCKERHUB_REPO }}:${{ github.sha }} -f Dockerfile .
+          docker tag ${{ env.DOCKERHUB_REPO }}:${{ github.sha }} ${{ env.DOCKERHUB_REPO }}:latest
+
+      # 推送 Docker 镜像到 Docker Hub
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker push ${{ env.DOCKERHUB_REPO }}:${{ github.sha }}
+          docker push ${{ env.DOCKERHUB_REPO }}:latest
+
+      # 发送成功通知
       - name: Send success notification
         if: success()
-        run: |
-          echo "✅ Successfully built and pushed ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}"
+        run: echo "✅ Docker image successfully built and pushed to Docker Hub!"
