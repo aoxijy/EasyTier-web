@@ -2,7 +2,7 @@ name: EasyTier Docker Build
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天 UTC 00:00 运行
+    - cron: '0 0 * * *'  # Daily build check
   workflow_dispatch:
     inputs:
       version:
@@ -18,35 +18,28 @@ jobs:
   version-check:
     runs-on: ubuntu-latest
     outputs:
-      should_build: ${{ steps.check-version.outputs.should_build }}
       build_version: ${{ steps.get-version.outputs.build_version }}
+      should_build: ${{ steps.check-version.outputs.should_build }}
     steps:
-      - name: Get latest version
+      - name: Get version
         id: get-version
         run: |
-          # 如果是手动触发且有指定版本，则使用该版本
           if [ -n "${{ inputs.version }}" ] && [ "${{ inputs.version }}" != "latest" ]; then
             BUILD_VERSION="${{ inputs.version }}"
           else
-            # 获取最新版本
             BUILD_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name')
           fi
-          
           echo "build_version=$BUILD_VERSION" >> $GITHUB_OUTPUT
-          echo "Building version: $BUILD_VERSION"
-          
-      - name: Check if build needed
+          echo "Version: $BUILD_VERSION"
+
+      - name: Check existing tags
         id: check-version
         run: |
-          # 检查此版本是否已构建过
           EXISTING_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/${{ env.DOCKERHUB_REPO }}/tags/?page_size=100" | jq -r '.results[].name')
-          
           if echo "$EXISTING_TAGS" | grep -q "${{ steps.get-version.outputs.build_version }}"; then
             echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Version ${{ steps.get-version.outputs.build_version }} already exists, skipping build"
           else
             echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "New version ${{ steps.get-version.outputs.build_version }}, building"
           fi
 
   build:
@@ -73,6 +66,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -81,17 +75,7 @@ jobs:
           build-args: |
             EASYTIER_VERSION=${{ needs.version-check.outputs.build_version }}
       
-      - name: Send notification
+      - name: Send success notification
         if: success()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `✅ Successfully built EasyTier with Web image \`${{ needs.version-check.outputs.build_version }}\`!\n\n` +
-                    `**Docker Hub:**\n` +
-                    `- ${{ env.DOCKERHUB_REPO }}:${{ needs.version-check.outputs.build_version }}\n` +
-                    `- ${{ env.DOCKERHUB_REPO }}:latest`
-            })
+        run: |
+          echo "✅ Successfully built ${{ env.DOCKERHUB_REPO }}:${{ needs.version-check.outputs.build_version }}"
