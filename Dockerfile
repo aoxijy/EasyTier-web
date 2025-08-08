@@ -7,9 +7,11 @@ RUN apk add --no-cache tzdata tini iptables wireguard-tools
 # 设置时区
 ENV TZ=Asia/Shanghai
 
-# 复制二进制和Web资源
+# 复制二进制
 COPY easytier-core /usr/local/bin/
-COPY web /var/www/html  # Web界面静态文件
+
+# 复制Web资源（如果存在）
+COPY web /var/www/html 2>/dev/null || echo "Web directory not found, skipping"
 
 # 暴露端口
 EXPOSE 11010/tcp  # TCP控制端口
