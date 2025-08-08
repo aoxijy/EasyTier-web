@@ -64,23 +64,64 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       
+      - name: Prepare source code
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 获取要构建的版本
+          BUILD_VERSION=${{ needs.version-check.outputs.build_version }}
+          if [ -n "${{ inputs.version }}" ] && [ "${{ inputs.version }}" != "latest" ]; then
+            BUILD_VERSION="${{ inputs.version }}"
+          fi
+          
+          # 确保版本号有 'v' 前缀
+          if [[ ! $BUILD_VERSION =~ ^v ]]; then
+            BUILD_VERSION="v$BUILD_VERSION"
+          fi
+          
+          echo "Building version: $BUILD_VERSION"
+          
+          # 1. 克隆 EasyTier 主仓库
+          echo "Cloning EasyTier main repository..."
+          git clone --depth 1 --branch $BUILD_VERSION https://github.com/EasyTier/EasyTier.git easytier-source
+          
+          # 2. 克隆 EasyTier-Web-Embed
+          echo "Cloning EasyTier-Web-Embed..."
+          git clone --depth 1 https://github.com/EasyTier/EasyTier-Web-Embed.git web-source
+          
+          # 3. 构建 Web UI
+          echo "Building Web UI..."
+          cd web-source
+          npm ci --silent
+          npm run build
+          cd ..
+          
+          # 4. 将构建好的 Web UI 复制到主仓库
+          echo "Copying built Web UI to main repository..."
+          mkdir -p easytier-source/web/dist
+          cp -r web-source/dist/* easytier-source/web/dist/
+          
+          # 5. 复制 Dockerfile 到构建上下文
+          echo "Copying Dockerfile to build context..."
+          cp Dockerfile easytier-source/
+          
+          # 保存版本信息
+          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
+      
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./easytier-source
+          file: ./easytier-source/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.DOCKERHUB_REPO }}:${{ needs.version-check.outputs.build_version }}
+            ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
             ${{ env.DOCKERHUB_REPO }}:latest
           build-args: |
-            EASYTIER_VERSION=${{ needs.version-check.outputs.build_version }}
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
-          secrets: |
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            EASYTIER_VERSION=${{ env.BUILD_VERSION }}
       
       - name: Send success notification
         if: success()
         run: |
-          echo "✅ Successfully built ${{ env.DOCKERHUB_REPO }}:${{ needs.version-check.outputs.build_version }}"
+          echo "✅ Successfully built ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}"
