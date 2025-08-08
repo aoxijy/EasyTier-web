@@ -81,27 +81,37 @@ jobs:
           wget -O easytier.zip "$URL"
           
           # 解压ZIP文件
-          unzip easytier.zip -d easytier-${BUILD_VERSION}
+          unzip easytier.zip -d easytier-unpacked
           
-          # 进入解压目录
-          cd "easytier-${BUILD_VERSION}"
+          # 进入解压后的实际目录（根据您的输出）
+          cd "easytier-unpacked/easytier-${BUILD_VERSION}/easytier-linux-x86_64"
           
           # 确保可执行权限
           chmod +x easytier-core
           
+          # 构建Web界面（如果需要）
+          if [ -f "easytier-web-embed" ]; then
+            chmod +x easytier-web-embed
+            ./easytier-web-embed --build-web
+          fi
+          
           # 创建Docker构建上下文
           mkdir -p docker-context
           cp easytier-core docker-context/
-          cp -r web docker-context/web  # 复制预构建的web目录
           
-          # 返回上级目录
-          cd ..
+          # 复制Web资源（如果存在）
+          if [ -d "web" ]; then
+            cp -r web docker-context/web
+          fi
+          
+          # 返回工作目录
+          cd ../../..
       
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./easytier-${BUILD_VERSION}/docker-context
-          file: ./Dockerfile  # 使用仓库根目录的Dockerfile
+          context: ./easytier-unpacked/easytier-${BUILD_VERSION}/easytier-linux-x86_64/docker-context
+          file: ./Dockerfile
           push: true
           tags: |
             ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
