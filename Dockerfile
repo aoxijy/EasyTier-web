@@ -11,8 +11,8 @@ ENV TZ=Asia/Shanghai
 COPY easytier-core /usr/local/bin/
 COPY easytier-web-embed /usr/local/bin/
 
-# 复制Web资源（如果存在）
-COPY web /var/www/html 2>/dev/null || echo "Web directory not found, skipping"
+# 复制 Web 资源（如果存在）
+RUN if [ -d "web" ]; then cp -r web /var/www/html; else echo "Web directory not found, skipping"; fi
 
 # 暴露端口
 EXPOSE 11010/tcp  # TCP控制端口
