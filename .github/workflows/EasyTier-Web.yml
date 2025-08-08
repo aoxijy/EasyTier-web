@@ -74,6 +74,9 @@ jobs:
             ${{ env.DOCKERHUB_REPO }}:latest
           build-args: |
             EASYTIER_VERSION=${{ needs.version-check.outputs.build_version }}
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          secrets: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
       
       - name: Send success notification
         if: success()
