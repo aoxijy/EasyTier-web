@@ -11,8 +11,7 @@ on:
         required: false
 
 env:
-  DOCKERHUB_REPO: aoxijy/easytier-web
-  GHCR_REPO: ghcr.io/aoxijy/easytier-web
+  DOCKERHUB_REPO: aoxijy/easytier-web  # 您的 Docker Hub 存储库
 
 jobs:
   version-check:
@@ -69,13 +68,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           
-      - name: 登录 GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          
       - name: 准备源码
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -97,7 +89,7 @@ jobs:
           echo "克隆 EasyTier 主仓库..."
           git clone --depth 1 --branch $BUILD_VERSION https://github.com/EasyTier/EasyTier.git easytier-source
           
-          # 进入目录并克隆 Web UI（使用 GitHub Token 认证）
+          # 进入目录并克隆 Web UI
           cd easytier-source
           echo "克隆 EasyTier-Web-Embed 子模块..."
           git clone --depth 1 "https://oauth2:$GITHUB_TOKEN@github.com/EasyTier/EasyTier-Web-Embed.git" web
@@ -168,8 +160,6 @@ EOL
           tags: |
             ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
             ${{ env.DOCKERHUB_REPO }}:latest
-            ${{ env.GHCR_REPO }}:${{ env.BUILD_VERSION }}
-            ${{ env.GHCR_REPO }}:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
             
@@ -185,8 +175,5 @@ EOL
               body: `✅ 已成功构建 EasyTier with Web 镜像 \`${{ env.BUILD_VERSION }}\`!\n\n` +
                     `**Docker Hub:**\n` +
                     `- ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}\n` +
-                    `- ${{ env.DOCKERHUB_REPO }}:latest\n\n` +
-                    `**GitHub Container Registry:**\n` +
-                    `- ${{ env.GHCR_REPO }}:${{ env.BUILD_VERSION }}\n` +
-                    `- ${{ env.GHCR_REPO }}:latest`
+                    `- ${{ env.DOCKERHUB_REPO }}:latest`
             })
