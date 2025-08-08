@@ -2,13 +2,14 @@
 FROM alpine:latest
 
 # 安装运行时依赖
-RUN apk add --no-cache tzdata tini iptables wireguard-tools
+RUN apk add --no-cache tzdata tini iptables wireguard-tools bash
 
 # 设置时区
 ENV TZ=Asia/Shanghai
 
 # 复制二进制文件
 COPY easytier-core /usr/local/bin/
+COPY easytier-web-embed /usr/local/bin/
 
 # 复制Web资源（如果存在）
 COPY web /var/www/html 2>/dev/null || echo "Web directory not found, skipping"
@@ -21,5 +22,8 @@ EXPOSE 11011/tcp  # WebSocket
 EXPOSE 11012/tcp  # Secure WebSocket
 EXPOSE 8080/tcp   # Web管理界面端口
 
-# 设置入口点
-ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]
+# 使用 tini 启动容器
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# 启动 easytier-core 和 easytier-web-embed 服务
+CMD ["sh", "-c", "/usr/local/bin/easytier-core & /usr/local/bin/easytier-web-embed --web-server-port 8080"]
