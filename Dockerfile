@@ -7,7 +7,7 @@ RUN apk add --no-cache tzdata tini iptables wireguard-tools
 # 设置时区
 ENV TZ=Asia/Shanghai
 
-# 复制二进制
+# 复制二进制文件
 COPY easytier-core /usr/local/bin/
 
 # 复制Web资源（如果存在）
