@@ -2,14 +2,17 @@ name: EasyTier Auto Build with Web
 
 on:
   schedule:
-    # 每天 UTC 时间 00:00 检查更新（北京时间 08:00）
-    - cron: '0 0 * * *'
+    - cron: '0 0 * * *'  # 每天 UTC 00:00 运行
   workflow_dispatch:
     inputs:
       force_version:
         description: '强制构建特定版本 (例如 v2.4.1)'
         type: string
         required: false
+
+env:
+  DOCKERHUB_REPO: aoxijy/easytier-web
+  GHCR_REPO: ghcr.io/aoxijy/easytier-web
 
 jobs:
   version-check:
@@ -36,7 +39,7 @@ jobs:
           fi
           
           # 检查此版本是否已构建过
-          EXISTING_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/easytier/easytier-web/tags/?page_size=100" | jq -r '.results[].name')
+          EXISTING_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/${{ env.DOCKERHUB_REPO }}/tags/?page_size=100" | jq -r '.results[].name')
           
           if echo "$EXISTING_TAGS" | grep -q "${{ steps.get-version.outputs.latest_version }}"; then
             echo "should_build=false" >> $GITHUB_OUTPUT
@@ -74,6 +77,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
           
       - name: 准备源码
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # 获取要构建的版本
           BUILD_VERSION=${{ needs.version-check.outputs.latest_version }}
@@ -81,66 +86,77 @@ jobs:
             BUILD_VERSION="${{ inputs.force_version }}"
           fi
           
+          # 确保版本号有 'v' 前缀
+          if [[ ! $BUILD_VERSION =~ ^v ]]; then
+            BUILD_VERSION="v$BUILD_VERSION"
+          fi
+          
           echo "正在构建版本: $BUILD_VERSION"
           
           # 克隆 EasyTier 主仓库
+          echo "克隆 EasyTier 主仓库..."
           git clone --depth 1 --branch $BUILD_VERSION https://github.com/EasyTier/EasyTier.git easytier-source
           
-          # 克隆并构建 Web UI
+          # 进入目录并克隆 Web UI（使用 GitHub Token 认证）
           cd easytier-source
-          git clone --depth 1 https://github.com/EasyTier/EasyTier-Web-Embed.git web
+          echo "克隆 EasyTier-Web-Embed 子模块..."
+          git clone --depth 1 "https://oauth2:$GITHUB_TOKEN@github.com/EasyTier/EasyTier-Web-Embed.git" web
+          
+          # 构建 Web UI
           cd web
+          echo "安装 npm 依赖..."
           npm ci --silent
+          echo "构建 Web 界面..."
           npm run build
           cd ..
           
           # 创建 Dockerfile
           cat > Dockerfile <<EOL
-          # 使用官方基础镜像结构
-          FROM alpine:latest AS base
+# 使用官方基础镜像结构
+FROM alpine:latest AS base
+
+# 构建阶段
+FROM base AS builder
+
+# 安装构建依赖
+RUN apk add --no-cache git nodejs npm go gcc musl-dev
+
+# 复制源码
+COPY . /src/easytier
+WORKDIR /src/easytier
+
+# 构建主程序
+RUN go build -o easytier-core -ldflags "-s -w -X 'main.version=$BUILD_VERSION'" ./cmd/easytier
+
+# 准备最终输出
+RUN mkdir -p /tmp/output && \\
+    cp easytier-core /tmp/output/easytier-core
+
+# 最终镜像阶段
+FROM base
+
+# 安装运行时依赖
+RUN apk add --no-cache tzdata tini iptables wireguard-tools
+
+# 复制构建好的二进制文件
+COPY --from=builder --chmod=755 /tmp/output/* /usr/local/bin
+
+# 设置时区
+ENV TZ=Asia/Shanghai
+
+# 暴露端口
+EXPOSE 11010/tcp   # TCP 控制端口
+EXPOSE 11010/udp   # UDP 数据端口
+EXPOSE 11011/udp   # WireGuard UDP
+EXPOSE 11011/tcp   # WebSocket
+EXPOSE 11012/tcp   # Secure WebSocket
+EXPOSE 8080/tcp    # Web 管理界面端口
+
+# 设置入口点
+ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]
+EOL
           
-          # 构建阶段
-          FROM base AS builder
-          
-          # 安装构建依赖
-          RUN apk add --no-cache git nodejs npm go gcc musl-dev
-          
-          # 复制源码
-          COPY . /src/easytier
-          WORKDIR /src/easytier
-          
-          # 构建主程序
-          RUN go build -o easytier-core -ldflags "-s -w -X 'main.version=$BUILD_VERSION'" ./cmd/easytier
-          
-          # 准备最终输出
-          RUN mkdir -p /tmp/output && \\
-              cp easytier-core /tmp/output/easytier-core
-          
-          # 最终镜像阶段
-          FROM base
-          
-          # 安装运行时依赖
-          RUN apk add --no-cache tzdata tini iptables wireguard-tools
-          
-          # 复制构建好的二进制文件
-          COPY --from=builder --chmod=755 /tmp/output/* /usr/local/bin
-          
-          # 设置时区
-          ENV TZ=Asia/Shanghai
-          
-          # 暴露端口
-          EXPOSE 11010/tcp   # TCP 控制端口
-          EXPOSE 11010/udp   # UDP 数据端口
-          EXPOSE 11011/udp   # WireGuard UDP
-          EXPOSE 11011/tcp   # WebSocket
-          EXPOSE 11012/tcp   # Secure WebSocket
-          EXPOSE 8080/tcp    # Web 管理界面端口
-          
-          # 设置入口点
-          ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]
-          EOL
-          
-          # 保存版本信息供后续步骤使用
+          # 保存版本信息
           echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
           
       - name: 构建并推送镜像
@@ -150,10 +166,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            aoxijy/easytier-web:${{ env.BUILD_VERSION }}
-            aoxijy/easytier-web:latest
-            ghcr.io/aoxijy/easytier-web:${{ env.BUILD_VERSION }}
-            ghcr.io/aoxijy/easytier-web:latest
+            ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
+            ${{ env.DOCKERHUB_REPO }}:latest
+            ${{ env.GHCR_REPO }}:${{ env.BUILD_VERSION }}
+            ${{ env.GHCR_REPO }}:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
             
@@ -168,9 +184,9 @@ jobs:
               repo: context.repo.repo,
               body: `✅ 已成功构建 EasyTier with Web 镜像 \`${{ env.BUILD_VERSION }}\`!\n\n` +
                     `**Docker Hub:**\n` +
-                    `- easytier/easytier-web:${{ env.BUILD_VERSION }}\n` +
-                    `- easytier/easytier-web:latest\n\n` +
+                    `- ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}\n` +
+                    `- ${{ env.DOCKERHUB_REPO }}:latest\n\n` +
                     `**GitHub Container Registry:**\n` +
-                    `- ghcr.io/easytier/easytier-web:${{ env.BUILD_VERSION }}\n` +
-                    `- ghcr.io/easytier/easytier-web:latest`
+                    `- ${{ env.GHCR_REPO }}:${{ env.BUILD_VERSION }}\n` +
+                    `- ${{ env.GHCR_REPO }}:latest`
             })
