@@ -7,14 +7,15 @@ FROM base AS builder
 # 安装构建依赖
 RUN apk add --no-cache git nodejs npm go gcc musl-dev
 
-# 克隆 EasyTier 主仓库
-RUN git clone https://github.com/EasyTier/EasyTier.git /src/easytier
+# 克隆 EasyTier 主仓库 - 使用特定版本
+ARG EASYTIER_VERSION=latest
+RUN git clone --depth 1 --branch ${EASYTIER_VERSION} https://github.com/EasyTier/EasyTier.git /src/easytier
 WORKDIR /src/easytier
 
 # 克隆并构建 EasyTier-Web-Embed
-RUN git clone https://github.com/EasyTier/EasyTier-Web-Embed.git web
+RUN git clone --depth 1 https://github.com/EasyTier/EasyTier-Web-Embed.git web
 WORKDIR /src/easytier/web
-RUN npm install && npm run build
+RUN npm ci --silent && npm run build
 
 # 返回主目录构建主程序
 WORKDIR /src/easytier
