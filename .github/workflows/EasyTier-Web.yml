@@ -85,9 +85,9 @@ jobs:
           echo "Cloning EasyTier main repository..."
           git clone --depth 1 --branch $BUILD_VERSION https://github.com/EasyTier/EasyTier.git easytier-source
           
-          # 2. 克隆 EasyTier-Web-Embed
-          echo "Cloning EasyTier-Web-Embed..."
-          git clone --depth 1 https://github.com/EasyTier/EasyTier-Web-Embed.git web-source
+          # 2. 克隆 EasyTier-Web-Embed (使用 GitHub Token 认证)
+          echo "Cloning EasyTier-Web-Embed with authentication..."
+          git clone --depth 1 "https://oauth2:$GITHUB_TOKEN@github.com/EasyTier/EasyTier-Web-Embed.git" web-source
           
           # 3. 构建 Web UI
           echo "Building Web UI..."
