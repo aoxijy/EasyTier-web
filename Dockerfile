@@ -1,42 +1,45 @@
-# 使用官方基础镜像结构
-FROM alpine:latest AS base
+# 第一阶段：下载对应架构的二进制
+ARG BUILD_VERSION
+ARG TARGETARCH
 
-# 构建阶段
-FROM base AS builder
+FROM alpine:latest AS downloader
 
-# 安装构建依赖
-RUN apk add --no-cache git nodejs npm go gcc musl-dev
+# 安装依赖
+RUN apk add --no-cache wget
 
-# 复制源码（已在 Actions 中准备好）
-COPY . /src/easytier
-WORKDIR /src/easytier
+# 根据目标架构设置下载路径
+RUN case "${TARGETARCH}" in \
+    "amd64") ARCH="amd64" ;; \
+    "arm64") ARCH="aarch64" ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH}"; exit 1 ;; \
+    esac
 
-# 构建主程序
-RUN go build -o easytier-core -ldflags "-s -w" ./cmd/easytier
+# 下载官方发布包
+RUN wget -O /tmp/easytier.tar.gz \
+    "https://github.com/EasyTier/EasyTier/releases/download/${BUILD_VERSION}/easytier-${BUILD_VERSION}-linux-${ARCH}.tar.gz"
 
-# 准备最终输出
-RUN mkdir -p /tmp/output && \
-    cp easytier-core /tmp/output/easytier-core
+# 解压文件
+RUN tar -xzf /tmp/easytier.tar.gz -C /tmp
 
-# 最终镜像阶段
-FROM base
+# 第二阶段：构建最终镜像
+FROM alpine:latest
 
 # 安装运行时依赖
 RUN apk add --no-cache tzdata tini iptables wireguard-tools
 
-# 复制构建好的二进制文件
-COPY --from=builder --chmod=755 /tmp/output/* /usr/local/bin/
-
-# 设置时区 (用户可通过 -e TZ=xxx 覆盖)
+# 设置时区
 ENV TZ=Asia/Shanghai
 
-# 暴露所有官方默认端口
-EXPOSE 11010/tcp
-EXPOSE 11010/udp
-EXPOSE 11011/udp
-EXPOSE 11011/tcp
-EXPOSE 11012/tcp
-EXPOSE 8080/tcp
+# 从下载器阶段复制二进制
+COPY --from=downloader /tmp/easytier-${BUILD_VERSION}-linux-*/easytier-core /usr/local/bin/
 
-# 设置入口点 (保留官方 tini 用法)
+# 暴露端口
+EXPOSE 11010/tcp  # TCP 控制端口
+EXPOSE 11010/udp  # UDP 数据端口
+EXPOSE 11011/udp  # WireGuard UDP
+EXPOSE 11011/tcp  # WebSocket
+EXPOSE 11012/tcp  # Secure WebSocket
+EXPOSE 8080/tcp   # Web 管理界面端口
+
+# 设置入口点
 ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]
