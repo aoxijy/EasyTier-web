@@ -1,0 +1,176 @@
+name: EasyTier Auto Build with Web
+
+on:
+  schedule:
+    # 每天 UTC 时间 00:00 检查更新（北京时间 08:00）
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: '强制构建特定版本 (例如 v2.4.1)'
+        type: string
+        required: false
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    outputs:
+      latest_version: ${{ steps.get-version.outputs.latest_version }}
+      should_build: ${{ steps.check-version.outputs.should_build }}
+    steps:
+      - name: 获取最新版本
+        id: get-version
+        run: |
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name')
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "检测到最新版本: $LATEST_VERSION"
+
+      - name: 检查是否需要构建
+        id: check-version
+        run: |
+          # 如果是手动触发且有指定版本，则强制构建
+          if [ -n "${{ inputs.force_version }}" ]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "强制构建版本: ${{ inputs.force_version }}"
+            exit 0
+          fi
+          
+          # 检查此版本是否已构建过
+          EXISTING_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/easytier/easytier-web/tags/?page_size=100" | jq -r '.results[].name')
+          
+          if echo "$EXISTING_TAGS" | grep -q "${{ steps.get-version.outputs.latest_version }}"; then
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "版本 ${{ steps.get-version.outputs.latest_version }} 已存在，跳过构建"
+          else
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "检测到新版本 ${{ steps.get-version.outputs.latest_version }}，需要构建"
+          fi
+
+  build-and-push:
+    needs: version-check
+    if: ${{ needs.version-check.outputs.should_build == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置 QEMU
+        uses: docker/setup-qemu-action@v3
+        
+      - name: 设置 Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: 准备源码
+        run: |
+          # 获取要构建的版本
+          BUILD_VERSION=${{ needs.version-check.outputs.latest_version }}
+          if [ -n "${{ inputs.force_version }}" ]; then
+            BUILD_VERSION="${{ inputs.force_version }}"
+          fi
+          
+          echo "正在构建版本: $BUILD_VERSION"
+          
+          # 克隆 EasyTier 主仓库
+          git clone --depth 1 --branch $BUILD_VERSION https://github.com/EasyTier/EasyTier.git easytier-source
+          
+          # 克隆并构建 Web UI
+          cd easytier-source
+          git clone --depth 1 https://github.com/EasyTier/EasyTier-Web-Embed.git web
+          cd web
+          npm ci --silent
+          npm run build
+          cd ..
+          
+          # 创建 Dockerfile
+          cat > Dockerfile <<EOL
+          # 使用官方基础镜像结构
+          FROM alpine:latest AS base
+          
+          # 构建阶段
+          FROM base AS builder
+          
+          # 安装构建依赖
+          RUN apk add --no-cache git nodejs npm go gcc musl-dev
+          
+          # 复制源码
+          COPY . /src/easytier
+          WORKDIR /src/easytier
+          
+          # 构建主程序
+          RUN go build -o easytier-core -ldflags "-s -w -X 'main.version=$BUILD_VERSION'" ./cmd/easytier
+          
+          # 准备最终输出
+          RUN mkdir -p /tmp/output && \\
+              cp easytier-core /tmp/output/easytier-core
+          
+          # 最终镜像阶段
+          FROM base
+          
+          # 安装运行时依赖
+          RUN apk add --no-cache tzdata tini iptables wireguard-tools
+          
+          # 复制构建好的二进制文件
+          COPY --from=builder --chmod=755 /tmp/output/* /usr/local/bin
+          
+          # 设置时区
+          ENV TZ=Asia/Shanghai
+          
+          # 暴露端口
+          EXPOSE 11010/tcp   # TCP 控制端口
+          EXPOSE 11010/udp   # UDP 数据端口
+          EXPOSE 11011/udp   # WireGuard UDP
+          EXPOSE 11011/tcp   # WebSocket
+          EXPOSE 11012/tcp   # Secure WebSocket
+          EXPOSE 8080/tcp    # Web 管理界面端口
+          
+          # 设置入口点
+          ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]
+          EOL
+          
+          # 保存版本信息供后续步骤使用
+          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
+          
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: ./easytier-source
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            easytier/easytier-web:${{ env.BUILD_VERSION }}
+            easytier/easytier-web:latest
+            ghcr.io/easytier/easytier-web:${{ env.BUILD_VERSION }}
+            ghcr.io/easytier/easytier-web:latest
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+            
+      - name: 发送通知
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `✅ 已成功构建 EasyTier with Web 镜像 \`${{ env.BUILD_VERSION }}\`!\n\n` +
+                    `**Docker Hub:**\n` +
+                    `- easytier/easytier-web:${{ env.BUILD_VERSION }}\n` +
+                    `- easytier/easytier-web:latest\n\n` +
+                    `**GitHub Container Registry:**\n` +
+                    `- ghcr.io/easytier/easytier-web:${{ env.BUILD_VERSION }}\n` +
+                    `- ghcr.io/easytier/easytier-web:latest`
+            })
