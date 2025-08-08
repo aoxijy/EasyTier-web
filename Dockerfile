@@ -12,8 +12,10 @@ ARG EASYTIER_VERSION=latest
 RUN git clone --depth 1 --branch ${EASYTIER_VERSION} https://github.com/EasyTier/EasyTier.git /src/easytier
 WORKDIR /src/easytier
 
-# 克隆并构建 EasyTier-Web-Embed
-RUN git clone --depth 1 https://github.com/EasyTier/EasyTier-Web-Embed.git web
+# 克隆并构建 EasyTier-Web-Embed (使用令牌认证)
+RUN git config --global url."https://oauth2:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/" && \
+    git clone --depth 1 https://github.com/EasyTier/EasyTier-Web-Embed.git web
+
 WORKDIR /src/easytier/web
 RUN npm ci --silent && npm run build
 
