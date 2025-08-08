@@ -2,7 +2,7 @@ name: EasyTier Auto Build with Web
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天 UTC 00:00 运行
+    - cron: '0 0 * * *'  # Daily build check
   workflow_dispatch:
     inputs:
       force_version:
@@ -25,14 +25,14 @@ jobs:
         run: |
           LATEST_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name')
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-          echo "Latest version detected: $LATEST_VERSION"
+          echo "Latest version: $LATEST_VERSION"
 
-      - name: Check if build is needed
+      - name: Check if build needed
         id: check-version
         run: |
           if [ -n "${{ inputs.force_version }}" ]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "Forcing build for version: ${{ inputs.force_version }}"
+            echo "Forcing build for: ${{ inputs.force_version }}"
             exit 0
           fi
           
@@ -40,10 +40,10 @@ jobs:
           
           if echo "$EXISTING_TAGS" | grep -q "${{ steps.get-version.outputs.latest_version }}"; then
             echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Version ${{ steps.get-version.outputs.latest_version }} already exists, skipping build"
+            echo "Version ${{ steps.get-version.outputs.latest_version }} exists, skipping"
           else
             echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "New version ${{ steps.get-version.outputs.latest_version }} detected, building"
+            echo "New version ${{ steps.get-version.outputs.latest_version }}, building"
           fi
 
   build-and-push:
@@ -91,8 +91,8 @@ jobs:
           npm run build
           cd ..
           
-          # Create Dockerfile with safe heredoc syntax
-          cat << 'EOF' > Dockerfile
+          # 使用外部文件存储 Dockerfile 内容
+          cat > Dockerfile << 'EOL'
 FROM alpine:latest AS base
 
 FROM base AS builder
@@ -123,7 +123,7 @@ EXPOSE 11012/tcp
 EXPOSE 8080/tcp
 
 ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]
-EOF
+EOL
           
           echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
       
@@ -136,8 +136,6 @@ EOF
           tags: |
             ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
             ${{ env.DOCKERHUB_REPO }}:latest
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
       
       - name: Send notification
         if: success()
