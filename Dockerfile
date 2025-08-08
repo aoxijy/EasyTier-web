@@ -38,12 +38,12 @@ COPY --from=builder --chmod=755 /tmp/output/* /usr/local/bin/
 ENV TZ=Asia/Shanghai
 
 # 暴露所有官方默认端口
-EXPOSE 11010/tcp  # TCP 控制端口
-EXPOSE 11010/udp  # UDP 数据端口
-EXPOSE 11011/udp  # WireGuard UDP
-EXPOSE 11011/tcp  # WebSocket
-EXPOSE 11012/tcp  # Secure WebSocket
-EXPOSE 8080/tcp   # Web 管理界面端口
+EXPOSE 11010/tcp
+EXPOSE 11010/udp
+EXPOSE 11011/udp
+EXPOSE 11011/tcp
+EXPOSE 11012/tcp
+EXPOSE 8080/tcp
 
 # 设置入口点 (保留官方 tini 用法)
 ENTRYPOINT ["/sbin/tini", "--", "easytier-core"]
