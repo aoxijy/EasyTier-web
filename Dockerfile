@@ -16,10 +16,10 @@ COPY easytier-web-embed /usr/local/bin/
 COPY start.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/start.sh
 
-# 复制Web资源
+# 复制Web资源（静态目录）
 COPY web /var/www/html
 
-# 暴露端口
+# 暴露端口（根据需求可调整）
 EXPOSE 11010/tcp   # TCP控制端口
 EXPOSE 11010/udp   # UDP数据端口
 EXPOSE 11011/udp   # WireGuard UDP
