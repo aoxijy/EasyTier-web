@@ -4,6 +4,8 @@ FROM alpine:latest
 # 安装运行时依赖
 RUN apk add --no-cache tzdata tini iptables wireguard-tools bash
 
+RUN apk add --no-cache tzdata tini iptables wireguard-tools bash ttf-dejavu fontconfig
+
 # 设置时区
 ENV TZ=Asia/Shanghai
 
