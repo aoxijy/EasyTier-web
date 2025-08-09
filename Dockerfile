@@ -7,12 +7,14 @@ RUN apk add --no-cache tzdata tini iptables wireguard-tools bash
 # 设置时区
 ENV TZ=Asia/Shanghai
 
-# 复制二进制文件
+# 复制二进制文件和启动脚本
 COPY easytier-core /usr/local/bin/
 COPY easytier-web-embed /usr/local/bin/
+COPY start.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start.sh
 
-# 复制 Web 资源（如果存在）
-RUN if [ -d "web" ]; then cp -r web /var/www/html; else echo "Web directory not found, skipping"; fi
+# 复制Web资源
+COPY web /var/www/html
 
 # 暴露端口
 EXPOSE 11010/tcp
@@ -22,14 +24,16 @@ EXPOSE 11010/udp
 EXPOSE 11011/udp
 # WireGuard UDP
 EXPOSE 11011/tcp
-# WebSocket
+# WireGuard TCP
 EXPOSE 11012/tcp
-# Secure WebSocket
+# WebSocket
+EXPOSE 11211/tcp
+# REST API服务器端口 (新增)
 EXPOSE 8080/tcp
 # Web管理界面端口
 
-# 使用 tini 启动容器
+# 使用tini启动容器
 ENTRYPOINT ["/sbin/tini", "--"]
 
-# 启动 easytier-core 和 easytier-web-embed 服务
-CMD ["sh", "-c", "/usr/local/bin/easytier-core & /usr/local/bin/easytier-web-embed --web-server-port 8080"]
+# 使用自定义启动脚本
+CMD ["/usr/local/bin/start.sh"]
