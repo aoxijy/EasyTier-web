@@ -1,10 +1,12 @@
-name: Build and Publish EasyTier Docker Image
+name: EasyTier Docker Build (AMD64)
 
 on:
-  push:
-    branches:
-      - main  # 当推送到主分支时自动触发构建
-  workflow_dispatch:  # 支持手动触发构建
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'EasyTier version to build (e.g. 2.4.1)'
+        type: string
+        required: true
 
 env:
   DOCKERHUB_REPO: aoxijy/easytier-web
@@ -12,53 +14,67 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      # Checkout 仓库代码
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # 设置 Docker Buildx
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      # Docker Hub 登录
+        with:
+          install: true
+      
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # 获取最新版本并下载 EasyTier Release
-      - name: Get latest EasyTier release version
+      
+      - name: Prepare artifacts
         run: |
-          # 获取最新版本号
-          BUILD_VERSION=$(curl -s https://api.github.com/repos/EasyTier/EasyTier/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          echo "Using EasyTier version: $BUILD_VERSION"
+          # 使用手动输入的版本
+          BUILD_VERSION="${{ github.event.inputs.version }}"
+          echo "Building version: $BUILD_VERSION"
+          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
           
-          # 下载并解压 EasyTier 版本包
+          # 下载官方Release压缩包
+          echo "下载EasyTier发布包..."
           URL="https://github.com/EasyTier/EasyTier/releases/download/v${BUILD_VERSION}/easytier-linux-x86_64-v${BUILD_VERSION}.zip"
           wget -O easytier.zip "$URL"
-          unzip easytier.zip -d easytier-unpacked
-          cd easytier-unpacked/easytier-linux-x86_64
           
-          # 确保 `easytier-core` 和 `easytier-web-embed` 文件有执行权限
+          # 解压ZIP文件
+          unzip easytier.zip -d easytier-unpacked
+          
+          # 进入解压目录
+          cd "easytier-unpacked/easytier-${BUILD_VERSION}/easytier-linux-x86_64"
+          
+          # 确保可执行权限
           chmod +x easytier-core
           chmod +x easytier-web-embed
-
-      # 构建 Docker 镜像
-      - name: Build Docker image
-        run: |
-          docker build -t ${{ env.DOCKERHUB_REPO }}:${{ github.sha }} -f Dockerfile .
-          docker tag ${{ env.DOCKERHUB_REPO }}:${{ github.sha }} ${{ env.DOCKERHUB_REPO }}:latest
-
-      # 推送 Docker 镜像到 Docker Hub
-      - name: Push Docker image to Docker Hub
-        run: |
-          docker push ${{ env.DOCKERHUB_REPO }}:${{ github.sha }}
-          docker push ${{ env.DOCKERHUB_REPO }}:latest
-
-      # 发送成功通知
+          
+          # 构建Web界面
+          ./easytier-web-embed --build-web
+          
+          # 创建Docker构建上下文
+          mkdir -p docker-context
+          cp easytier-core docker-context/
+          cp easytier-web-embed docker-context/
+          cp -r web docker-context/web
+          cp ../../../../start.sh docker-context/
+          
+          # 返回工作目录
+          cd ../../..
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./easytier-unpacked/easytier-${BUILD_VERSION}/easytier-linux-x86_64/docker-context
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
+            ${{ env.DOCKERHUB_REPO }}:latest
+      
       - name: Send success notification
         if: success()
-        run: echo "✅ Docker image successfully built and pushed to Docker Hub!"
+        run: |
+          echo "✅ 成功构建并推送 ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}"
