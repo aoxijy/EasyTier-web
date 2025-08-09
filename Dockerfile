@@ -15,12 +15,18 @@ COPY easytier-web-embed /usr/local/bin/
 RUN if [ -d "web" ]; then cp -r web /var/www/html; else echo "Web directory not found, skipping"; fi
 
 # 暴露端口
-EXPOSE 11010/tcp  # TCP控制端口
-EXPOSE 11010/udp  # UDP数据端口
-EXPOSE 11011/udp  # WireGuard UDP
-EXPOSE 11011/tcp  # WebSocket
-EXPOSE 11012/tcp  # Secure WebSocket
-EXPOSE 8080/tcp   # Web管理界面端口
+EXPOSE 11010/tcp
+# TCP控制端口
+EXPOSE 11010/udp
+# UDP数据端口
+EXPOSE 11011/udp
+# WireGuard UDP
+EXPOSE 11011/tcp
+# WebSocket
+EXPOSE 11012/tcp
+# Secure WebSocket
+EXPOSE 8080/tcp
+# Web管理界面端口
 
 # 使用 tini 启动容器
 ENTRYPOINT ["/sbin/tini", "--"]
