@@ -41,11 +41,18 @@ jobs:
           URL="https://github.com/EasyTier/EasyTier/releases/download/v${BUILD_VERSION}/easytier-linux-x86_64-v${BUILD_VERSION}.zip"
           wget -O easytier.zip "$URL"
           
-          # 解压ZIP文件
+          # 解压ZIP文件 - 修复目录结构问题
           unzip easytier.zip -d easytier-unpacked
           
-          # 进入解压目录
-          cd "easytier-unpacked/easytier-${BUILD_VERSION}/easytier-linux-x86_64"
+          # 进入解压目录 - 根据实际目录结构调整
+          cd easytier-unpacked
+          
+          # 重命名目录以匹配预期结构
+          if [ -d "easytier-linux-x86_64" ]; then
+              mv easytier-linux-x86_64 easytier-${BUILD_VERSION}
+          fi
+          
+          cd easytier-${BUILD_VERSION}
           
           # 确保可执行权限
           chmod +x easytier-core
@@ -59,7 +66,7 @@ jobs:
           cp easytier-core docker-context/
           cp easytier-web-embed docker-context/
           cp -r web docker-context/web
-          cp ../../../../start.sh docker-context/
+          cp ../../../start.sh docker-context/
           
           # 返回工作目录
           cd ../../..
@@ -67,7 +74,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./easytier-unpacked/easytier-${BUILD_VERSION}/easytier-linux-x86_64/docker-context
+          context: ./easytier-unpacked/easytier-${BUILD_VERSION}/docker-context
           file: ./Dockerfile
           push: true
           tags: |
