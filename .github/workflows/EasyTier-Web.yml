@@ -1,36 +1,90 @@
-#!/bin/sh
+name: EasyTier Docker Build (AMD64)
 
-# 设置日志级别 (可根据需要调整)
-LOG_LEVEL=${LOG_LEVEL:-info}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'EasyTier version to build (e.g. 2.4.1)'
+        type: string
+        required: true
 
-# 启动easytier-web-embed服务
-/usr/local/bin/easytier-web-embed \
-  --db /data/et.db \
-  --console-log-level $LOG_LEVEL \
-  --file-log-level $LOG_LEVEL \
-  --file-log-dir /var/log/easytier \
-  --config-server-port 22020 \
-  --config-server-protocol udp \
-  --api-server-port 11211 \
-  --web-server-port 8080 \
-  &
-WEB_PID=$!
+env:
+  DOCKERHUB_REPO: aoxijy/easytier-web
 
-# 启动easytier-core服务
-/usr/local/bin/easytier-core &
-CORE_PID=$!
-
-# 捕获退出信号
-cleanup() {
-  echo "终止服务..."
-  kill $WEB_PID
-  kill $CORE_PID
-  wait
-  exit 0
-}
-
-trap cleanup TERM INT
-
-# 等待子进程退出
-wait $WEB_PID $CORE_PID
-cleanup
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Prepare artifacts
+        run: |
+          # 使用手动输入的版本
+          BUILD_VERSION="${{ github.event.inputs.version }}"
+          echo "Building version: $BUILD_VERSION"
+          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
+          
+          # 下载官方Release压缩包
+          echo "下载EasyTier发布包..."
+          URL="https://github.com/EasyTier/EasyTier/releases/download/v${BUILD_VERSION}/easytier-linux-x86_64-v${BUILD_VERSION}.zip"
+          wget -O easytier.zip "$URL"
+          
+          # 解压ZIP文件
+          unzip easytier.zip -d easytier-unpacked
+          
+          # 进入解压目录并重命名
+          cd easytier-unpacked
+          if [ -d "easytier-linux-x86_64" ]; then
+              mv easytier-linux-x86_64 easytier-${BUILD_VERSION}
+          fi
+          cd easytier-${BUILD_VERSION}
+          
+          # 确保可执行权限
+          chmod +x easytier-core
+          chmod +x easytier-web-embed
+          
+          # 创建Docker构建上下文
+          mkdir -p docker-context
+          cp easytier-core docker-context/
+          cp easytier-web-embed docker-context/
+          
+          # 处理Web资源
+          if [ -d "web" ]; then
+              mkdir -p docker-context/web
+              cp -r web/* docker-context/web/
+          else
+              echo "警告：未找到web目录，Web界面可能无法正常工作"
+          fi
+          
+          # 复制启动脚本
+          cp ../../../start.sh docker-context/
+          
+          # 返回工作目录
+          cd ../../..
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./easytier-unpacked/easytier-${BUILD_VERSION}/docker-context
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}
+            ${{ env.DOCKERHUB_REPO }}:latest
+      
+      - name: Send success notification
+        if: success()
+        run: |
+          echo "✅ 成功构建并推送 ${{ env.DOCKERHUB_REPO }}:${{ env.BUILD_VERSION }}"
