@@ -58,14 +58,12 @@ jobs:
             echo "警告：未找到web目录，Web界面可能无法正常工作"
           fi
 
-          # 生成启动脚本
-          cat > docker-context/start.sh <<EOF
-#!/bin/sh
-set -e
-/usr/local/bin/easytier-core &
-/usr/local/bin/easytier-web-embed &
-wait
-EOF
+          # 生成启动脚本（用echo写多行）
+          echo '#!/bin/sh' > docker-context/start.sh
+          echo 'set -e' >> docker-context/start.sh
+          echo '/usr/local/bin/easytier-core &' >> docker-context/start.sh
+          echo '/usr/local/bin/easytier-web-embed &' >> docker-context/start.sh
+          echo 'wait' >> docker-context/start.sh
           chmod +x docker-context/start.sh
 
           cd ../../..
