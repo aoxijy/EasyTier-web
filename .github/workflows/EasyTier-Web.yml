@@ -62,11 +62,14 @@ jobs:
           cd ../..
           cp start.sh easytier-unpacked/easytier-${BUILD_VERSION}/docker-context/
 
+          # 列出构建上下文内容（调试用）
+          ls -l easytier-unpacked/easytier-${BUILD_VERSION}/docker-context
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: ./easytier-unpacked/easytier-${{ github.event.inputs.version }}/docker-context
-          file: ./Dockerfile
+          file: ./Dockerfile  # 确保使用仓库根目录的原始Dockerfile
           push: true
           tags: |
             ${{ env.DOCKERHUB_REPO }}:${{ github.event.inputs.version }}
