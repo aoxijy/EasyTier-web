@@ -58,39 +58,64 @@ jobs:
             mkdir -p docker-context/web
           fi
           
-          # 生成新的启动脚本 start.sh
+          # 生成完整的启动脚本 start.sh
           echo '#!/bin/sh' > docker-context/start.sh
           echo 'set -e' >> docker-context/start.sh
           echo '' >> docker-context/start.sh
           echo '# 设置默认值' >> docker-context/start.sh
           echo 'CORE_PORT=${ET_CORE_PORT:-11010}' >> docker-context/start.sh
+          echo 'WG_PORT=${ET_WG_PORT:-11011}' >> docker-context/start.sh
+          echo 'WS_PORT=${ET_WS_PORT:-11012}' >> docker-context/start.sh
+          echo 'CONFIG_PORT=${ET_CONFIG_PORT:-22020}' >> docker-context/start.sh
+          echo 'API_PORT=${ET_API_PORT:-11211}' >> docker-context/start.sh
           echo 'WEB_PORT=${ET_WEB_PORT:-8080}' >> docker-context/start.sh
           echo 'NETWORK_NAME=${ET_NETWORK_NAME:-default}' >> docker-context/start.sh
           echo 'NETWORK_SECRET=${ET_NETWORK_SECRET:-}' >> docker-context/start.sh
+          echo 'DB_PATH=${ET_DB:-}' >> docker-context/start.sh
           echo '' >> docker-context/start.sh
           echo '# API主机配置' >> docker-context/start.sh
           echo 'if [ -n "$ET_API_HOST" ]; then' >> docker-context/start.sh
           echo '  API_HOST="$ET_API_HOST"' >> docker-context/start.sh
           echo 'else' >> docker-context/start.sh
-          echo '  API_HOST="http://localhost:$CORE_PORT"' >> docker-context/start.sh
+          echo '  API_HOST="http://localhost:$API_PORT"' >> docker-context/start.sh
+          echo 'fi' >> docker-context/start.sh
+          echo '' >> docker-context/start.sh
+          echo '# 创建数据库目录（如果设置了DB_PATH）' >> docker-context/start.sh
+          echo 'if [ -n "$DB_PATH" ]; then' >> docker-context/start.sh
+          echo '  mkdir -p "$(dirname "$DB_PATH")"' >> docker-context/start.sh
           echo 'fi' >> docker-context/start.sh
           echo '' >> docker-context/start.sh
           echo '# 启动核心服务' >> docker-context/start.sh
           echo 'echo "启动 easytier-core..."' >> docker-context/start.sh
-          echo '/usr/local/bin/easytier-core \' >> docker-context/start.sh
-          echo '  --rpc-portal "0.0.0.0:$CORE_PORT" \' >> docker-context/start.sh
-          echo '  --vpn-portal "0.0.0.0:$CORE_PORT" \' >> docker-context/start.sh
-          echo '  --network-name "$NETWORK_NAME" \' >> docker-context/start.sh
-          echo '  ${NETWORK_SECRET:+--network-secret "$NETWORK_SECRET"} \' >> docker-context/start.sh
-          echo '  --listeners "tcp:$CORE_PORT" \' >> docker-context/start.sh
-          echo '  --listeners "udp:$CORE_PORT" \' >> docker-context/start.sh
-          echo '  --listeners "wg:11011" &' >> docker-context/start.sh
+          echo 'args="--rpc-portal 0.0.0.0:$CORE_PORT"' >> docker-context/start.sh
+          echo 'args="$args --vpn-portal 0.0.0.0:$CORE_PORT"' >> docker-context/start.sh
+          echo 'args="$args --network-name \"$NETWORK_NAME\""' >> docker-context/start.sh
+          echo 'args="$args --listeners tcp:$CORE_PORT"' >> docker-context/start.sh
+          echo 'args="$args --listeners udp:$CORE_PORT"' >> docker-context/start.sh
+          echo 'args="$args --listeners wg:$WG_PORT"' >> docker-context/start.sh
+          echo 'args="$args --listeners ws:$WS_PORT"' >> docker-context/start.sh
+          echo '' >> docker-context/start.sh
+          echo '# 添加可选参数' >> docker-context/start.sh
+          echo 'if [ -n "$NETWORK_SECRET" ]; then' >> docker-context/start.sh
+          echo '  args="$args --network-secret \"$NETWORK_SECRET\""' >> docker-context/start.sh
+          echo 'fi' >> docker-context/start.sh
+          echo 'if [ -n "$DB_PATH" ]; then' >> docker-context/start.sh
+          echo '  args="$args --db-path \"$DB_PATH\""' >> docker-context/start.sh
+          echo 'fi' >> docker-context/start.sh
+          echo 'if [ -n "$ET_CONFIG_PROTOCOL" ]; then' >> docker-context/start.sh
+          echo '  args="$args --config-protocol \"$ET_CONFIG_PROTOCOL\""' >> docker-context/start.sh
+          echo 'fi' >> docker-context/start.sh
+          echo '' >> docker-context/start.sh
+          echo '# 执行命令' >> docker-context/start.sh
+          echo 'eval "/usr/local/bin/easytier-core $args &"' >> docker-context/start.sh
           echo '' >> docker-context/start.sh
           echo '# 启动Web服务' >> docker-context/start.sh
           echo 'echo "启动 easytier-web-embed..."' >> docker-context/start.sh
           echo '/usr/local/bin/easytier-web-embed \' >> docker-context/start.sh
           echo '  --web-server-port "$WEB_PORT" \' >> docker-context/start.sh
-          echo '  --api-host "$API_HOST" &' >> docker-context/start.sh
+          echo '  --api-host "$API_HOST" \' >> docker-context/start.sh
+          echo '  --api-server-port "$API_PORT" \' >> docker-context/start.sh
+          echo '  --config-server-port "$CONFIG_PORT" &' >> docker-context/start.sh
           echo '' >> docker-context/start.sh
           echo '# 等待所有服务' >> docker-context/start.sh
           echo 'wait' >> docker-context/start.sh
