@@ -10,10 +10,6 @@ CONFIG_PORT=${ET_CONFIG_PORT:-22020}
 WEB_PORT=${ET_WEB_PORT:-8080}
 
 # ===== API 主机配置 =====
-# 支持三种配置方式（优先级从高到低）：
-# 1. ET_API_HOST 环境变量（显式指定）
-# 2. ET_API_HOST_FILE 从文件读取（适合 Kubernetes Secrets）
-# 3. 默认值：localhost（容器内通信）
 if [ -n "$ET_API_HOST" ]; then
   API_HOST="$ET_API_HOST"
 elif [ -n "$ET_API_HOST_FILE" ]; then
@@ -25,7 +21,7 @@ fi
 # ===== 核心服务启动 =====
 echo "启动 easytier-core..."
 /usr/local/bin/easytier-core \
-  --control-port $CORE_PORT \
+  --rpc-portal 0.0.0.0:$CORE_PORT \  # 使用正确的参数名
   --wg-port $WG_PORT \
   --ws-port $WS_PORT \
   --api-port $API_PORT \
@@ -35,7 +31,7 @@ echo "启动 easytier-core..."
 echo "启动 easytier-web-embed..."
 echo "API 服务器: $API_HOST:$API_PORT"
 /usr/local/bin/easytier-web-embed \
-  --web-port $WEB_PORT \
+  --web-server-port $WEB_PORT \  # 使用正确的参数名
   --api-host "$API_HOST" \
   --api-port $API_PORT &
 
