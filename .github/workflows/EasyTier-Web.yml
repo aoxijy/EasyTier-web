@@ -17,12 +17,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
+        
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          install: true
-
+        
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -33,7 +31,6 @@ jobs:
         run: |
           BUILD_VERSION="${{ github.event.inputs.version }}"
           echo "Building version: $BUILD_VERSION"
-          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
           URL="https://github.com/EasyTier/EasyTier/releases/download/v${BUILD_VERSION}/easytier-linux-x86_64-v${BUILD_VERSION}.zip"
           wget -O easytier.zip "$URL"
           unzip easytier.zip -d easytier-unpacked
@@ -48,26 +45,22 @@ jobs:
           chmod +x easytier-web-embed
 
           mkdir -p docker-context
+          
+          # 复制应用程序文件
           cp easytier-core docker-context/
           cp easytier-web-embed docker-context/
-
+          
+          # 复制Web资源
           if [ -d "web" ]; then
-            mkdir -p docker-context/web
-            cp -r web/* docker-context/web/
+            cp -r web docker-context/
           else
             echo "警告：未找到web目录，Web界面可能无法正常工作"
             mkdir -p docker-context/web
           fi
-
-          # 生成启动脚本
-          echo '#!/bin/sh' > docker-context/start.sh
-          echo 'set -e' >> docker-context/start.sh
-          echo '/usr/local/bin/easytier-core &' >> docker-context/start.sh
-          echo '/usr/local/bin/easytier-web-embed &' >> docker-context/start.sh
-          echo 'wait' >> docker-context/start.sh
-          chmod +x docker-context/start.sh
-
-          cd ../../..
+          
+          # 返回仓库根目录复制 start.sh
+          cd ../..
+          cp start.sh easytier-unpacked/easytier-${BUILD_VERSION}/docker-context/
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -78,8 +71,3 @@ jobs:
           tags: |
             ${{ env.DOCKERHUB_REPO }}:${{ github.event.inputs.version }}
             ${{ env.DOCKERHUB_REPO }}:latest
-
-      - name: Send success notification
-        if: success()
-        run: |
-          echo "✅ 成功构建并推送 ${{ env.DOCKERHUB_REPO }}:${{ github.event.inputs.version }}"
