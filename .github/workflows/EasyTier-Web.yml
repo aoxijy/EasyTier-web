@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'EasyTier version to build (e.g. 2.4.1)'
+        description: 'EasyTier version to build (e.g. 2.4.2)'
         type: string
         required: true
 
@@ -58,19 +58,68 @@ jobs:
             mkdir -p docker-context/web
           fi
           
-          # 返回仓库根目录复制 start.sh
+          # 生成启动脚本 start.sh
+          echo '#!/bin/sh' > docker-context/start.sh
+          echo 'set -e' >> docker-context/start.sh
+          echo '' >> docker-context/start.sh
+          echo '# 设置默认端口' >> docker-context/start.sh
+          echo 'CORE_PORT=${ET_CORE_PORT:-11010}' >> docker-context/start.sh
+          echo 'API_PORT=${ET_API_PORT:-11211}' >> docker-context/start.sh
+          echo 'CONFIG_PORT=${ET_CONFIG_PORT:-22020}' >> docker-context/start.sh
+          echo 'WEB_PORT=${ET_WEB_PORT:-8080}' >> docker-context/start.sh
+          echo '' >> docker-context/start.sh
+          echo '# API主机配置' >> docker-context/start.sh
+          echo 'if [ -n "$ET_API_HOST" ]; then' >> docker-context/start.sh
+          echo '  API_HOST="$ET_API_HOST"' >> docker-context/start.sh
+          echo 'else' >> docker-context/start.sh
+          echo '  API_HOST="http://localhost:$API_PORT"' >> docker-context/start.sh
+          echo 'fi' >> docker-context/start.sh
+          echo '' >> docker-context/start.sh
+          echo '# 启动核心服务' >> docker-context/start.sh
+          echo 'echo "启动 easytier-core..."' >> docker-context/start.sh
+          echo '/usr/local/bin/easytier-core \' >> docker-context/start.sh
+          echo '  --rpc-portal "0.0.0.0:$CORE_PORT" \' >> docker-context/start.sh
+          echo '  --listeners "tcp:$CORE_PORT" \' >> docker-context/start.sh
+          echo '  --listeners "udp:$CORE_PORT" \' >> docker-context/start.sh
+          echo '  --listeners "wg:11011" \' >> docker-context/start.sh
+          echo '  --api-port "$API_PORT" \' >> docker-context/start.sh
+          echo '  --config-port "$CONFIG_PORT" &' >> docker-context/start.sh
+          echo '' >> docker-context/start.sh
+          echo '# 启动Web服务' >> docker-context/start.sh
+          echo 'echo "启动 easytier-web-embed..."' >> docker-context/start.sh
+          echo '/usr/local/bin/easytier-web-embed \' >> docker-context/start.sh
+          echo '  --web-server-port "$WEB_PORT" \' >> docker-context/start.sh
+          echo '  --api-host "$API_HOST" \' >> docker-context/start.sh
+          echo '  --api-server-port "$API_PORT" \' >> docker-context/start.sh
+          echo '  --config-server-port "$CONFIG_PORT" &' >> docker-context/start.sh
+          echo '' >> docker-context/start.sh
+          echo '# 等待所有服务' >> docker-context/start.sh
+          echo 'wait' >> docker-context/start.sh
+          
+          # 设置可执行权限
+          chmod +x docker-context/start.sh
+          
+          # 列出构建上下文内容
+          echo "构建上下文内容："
+          ls -l docker-context
+
           cd ../..
-          cp start.sh easytier-unpacked/easytier-${BUILD_VERSION}/docker-context/
-
-          # 列出构建上下文内容（调试用）
-          ls -l easytier-unpacked/easytier-${BUILD_VERSION}/docker-context
-
+          
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: ./easytier-unpacked/easytier-${{ github.event.inputs.version }}/docker-context
-          file: ./Dockerfile  # 确保使用仓库根目录的原始Dockerfile
+          file: ./Dockerfile
           push: true
           tags: |
             ${{ env.DOCKERHUB_REPO }}:${{ github.event.inputs.version }}
             ${{ env.DOCKERHUB_REPO }}:latest
+            
+      - name: Test Docker image
+        run: |
+          # 测试镜像基本功能
+          docker run --rm ${{ env.DOCKERHUB_REPO }}:${{ github.event.inputs.version }} /usr/local/bin/easytier-core --version
+          docker run --rm ${{ env.DOCKERHUB_REPO }}:${{ github.event.inputs.version }} /usr/local/bin/easytier-web-embed --version
+          
+          # 测试启动脚本
+          docker run --rm ${{ env.DOCKERHUB_REPO }}:${{ github.event.inputs.version }} cat /usr/local/bin/start.sh
